@@ -1,5 +1,5 @@
 ---
-title: "R_3"
+title: "RF_mejor_respuesta"
 author: "Ainhoa"
 date: "2024-05-19"
 output: html_document
@@ -10,21 +10,19 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-packages <- c('tidyverse','rpart','rpart.plot','gtools','Rmisc','scales','viridis','caret','AMR','randomForest','fastDummies','rattle','xgboost','ggpubr','reshape2','mlbench')
+packages <- c('tidyverse', 'rpart', 'rpart.plot', 'gtools', 'Rmisc', 'scales', 'viridis', 'caret', 'AMR', 'randomForest', 'fastDummies', 'rattle', 'xgboost', 'ggpubr', 'reshape2', 'mlbench', 'readxl', 'ranger', 'tidymodels', 'parallel', 'doParallel', 'ggpubr')
 
-if(sum(as.numeric(!packages %in% installed.packages())) != 0){
-  instalador <- packages[!packages %in% installed.packages()]
-  for(i in 1:length(instalador)) {
-    install.packages(instalador, dependencies = T)
-    break()}
-  sapply(packages, require, character = T) 
-} else {
-  sapply(packages, require, character = T) }
-library(readxl)
-library(ranger)
-library(tidymodels)
-library(parallel)
-library(doParallel)
+suppressWarnings({
+  if (sum(as.numeric(!packages %in% installed.packages())) != 0) {
+    instalador <- packages[!packages %in% installed.packages()]
+    for (i in 1:length(instalador)) {
+      install.packages(instalador, dependencies = TRUE)
+      break
+    }
+  }
+  sapply(packages, require, character.only = TRUE)
+})
+
 ```
 
 # Regression 
@@ -47,10 +45,11 @@ df2 = select(df, -all_of(variables_inutiles))
 ```
 
 ## SELECCIÓN DE VARIABLES PARA MEJOR RESPUESTA
-```{r SELECCIÓN DE VARIABLES PARA MEJOR RESPUESTA}
+```{r}
 X2 = df2[,2:67]
 X2$mejor_resp_num_ok <- df2$mejor_resp_num_ok
 ```
+
 ## Modelo sin ajuste de parametros-MEJOR RESPUESTA-
 ```{r}
 # Creación y entrenamiento del modelo
@@ -152,8 +151,8 @@ hiperpar_grid <- expand_grid(
 # EJECUCIÓN DE LA OPTIMIZACIÓN DE HIPERPARÁMETROS
 # ==============================================================================
 
-cl2 <- makePSOCKcluster(parallel::detectCores() - 1)
-registerDoParallel(cl2)
+cl3 <- makePSOCKcluster(parallel::detectCores() - 1)
+registerDoParallel(cl3)
 
 grid_fit <- tune_grid(
               object    = workflow_modelado,
@@ -162,7 +161,7 @@ grid_fit <- tune_grid(
               grid      = hiperpar_grid
             )
 
-stopCluster(cl2)
+stopCluster(cl3)
 ```
 
 ```{r}
@@ -208,7 +207,7 @@ rmse_train  <- rmse(
 rmse_train
 ```
 
-##Importancia de predictores
+## Importancia de predictores
 
 Importancia por pureza de nodos
 
@@ -245,6 +244,26 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
 ```
+## TOP 15
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (pureza de nodos)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))
+```
 
 ## Importancia por permutación
 Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
@@ -279,6 +298,27 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
 ```
+## Top 15
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          slice_max(order_by = importancia, n = 15)  # Usamos slice_max que es más explícito
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (permutación)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))
+```
+
 Ambas estrategias identifican Grado_tox, Toxicidad, Linf_1eval, PLR_1C y NLR_1eval,  como los predictores más influyentes, acorde a los datos de entrenamiento.
 
 # Clasificación
@@ -309,6 +349,59 @@ df2 = select(df, -all_of(variables_inutiles))
 ```{r SELECCIÓN DE VARIABLES PARA MEJOR RESPUESTA}
 X2 = df2[,2:67]
 X2$mejor_resp_num_ok <- as.factor(df2$mejor_resp_num_ok)
+```
+
+## Modelo sin hiperparámetros
+```{r}
+# Creación y entrenamiento del modelo
+# ==============================================================================
+set.seed(123)
+modelo_sin_ajustar  <- ranger(
+            formula   = mejor_resp_num_ok ~ .,
+            data      = X2,
+            num.trees = 10,
+            seed      = 123
+           )
+
+print(modelo_sin_ajustar)
+```
+
+```{r}
+predict(modelo_sin_ajustar, X2) %>% head
+```
+
+## Ealuating the model
+```{r}
+# Training data
+p_train <- predict(modelo_sin_ajustar, X2)
+
+# Evaluation data frame (Training)
+eval_train <- data.frame(obs=X2$mejor_resp_num_ok,
+                         pred=p_train)
+head(eval_train)
+
+predicciones_ <- p_train$predictions
+
+```
+
+```{r}
+# Generar predicciones
+predicciones <- predict(modelo_sin_ajustar, data = X2)
+
+# Asegúrate de que las predicciones están en el formato adecuado
+# Extrae las predicciones de clase si es un problema de clasificación
+predicciones_ <- predicciones$predictions
+
+# Crear un marco de datos para evaluación que incluya observaciones y predicciones
+eval_train <- data.frame(
+  obs = X2$mejor_resp_num_ok,  # las observaciones reales
+  pred = as.factor(predicciones_)  # asegúrate de convertir las predicciones a factor
+)
+
+# Matriz de confusión usando yardstick
+mat_confusion <- conf_mat(data = eval_train, truth = obs, estimate = pred)
+mat_confusion
+
 ```
 
 ## Mejora de los hiperparámetros
@@ -394,7 +487,7 @@ modelo_final_fit <- finalize_workflow(
                     fit(
                       data = X2
                     ) %>%
-                    pull_workflow_fit()
+                    extract_fit_parsnip()
 ```
 
 ```{r}
@@ -441,7 +534,7 @@ El resultado de predict(type="prob") es un dataframe con una fila por observaci�
 
 Por defecto, predict() asigna cada nueva observación a la clase con mayor probabilidad (en caso de empate se asigna de forma aleatoria). Sin embargo, este no tiene por qué ser el comportamiento deseado en todos los casos.
 
-##Importancia de predictores
+## Importancia de predictores
 
 Importancia por pureza de nodos
 
@@ -479,7 +572,31 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
 ```
-##Importancia por permutación
+## TOP 15
+
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (pureza de nodos)") +
+geom_col() +
+scale_fill_viridis_c() +  # Usa un gradiente de color para representar la importancia
+coord_flip() +  # Invierte los ejes para mejor visualización de las etiquetas
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))  # Ajusta el tamaño del texto para mejor legibilidad
+
+```
+
+## Importancia por permutación
 Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
 ```{r}
 # Entrenamiento modelo
@@ -513,4 +630,28 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
 ```
+## TOP 15
+
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (permutación)") +
+geom_col() +
+scale_fill_viridis_c() +  # Utiliza una escala de color para representar la importancia
+coord_flip() +  # Invierte los ejes para una mejor visualización de los nombres de los predictores
+theme_bw() +  # Utiliza un tema blanco y negro para el gráfico
+theme(legend.position = "none", axis.text = element_text(size = 12))  # Ajusta el tamaño del texto para mejorar la legibilidad
+```
+
+
 Ambas estrategias identifican SII_2C, LDH, SII_1C, NLR_1C, y SII_2C,  como los predictores más influyentes, acorde a los datos de entrenamiento.

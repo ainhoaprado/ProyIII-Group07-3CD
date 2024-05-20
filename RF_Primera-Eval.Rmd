@@ -1,5 +1,5 @@
 ---
-title: "RF_2"
+title: "RF_Primera_Eval"
 author: "Ainhoa"
 date: "2024-05-16"
 output: html_document
@@ -10,22 +10,19 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-packages <- c('tidyverse','rpart','rpart.plot','gtools','Rmisc','scales','viridis','caret','AMR','randomForest','fastDummies','rattle','xgboost','ggpubr','reshape2','mlbench')
+packages <- c('tidyverse', 'rpart', 'rpart.plot', 'gtools', 'Rmisc', 'scales', 'viridis', 'caret', 'AMR', 'randomForest', 'fastDummies', 'rattle', 'xgboost', 'ggpubr', 'reshape2', 'mlbench', 'readxl', 'ranger', 'tidymodels', 'parallel', 'doParallel', 'ggpubr')
 
-if(sum(as.numeric(!packages %in% installed.packages())) != 0){
-  instalador <- packages[!packages %in% installed.packages()]
-  for(i in 1:length(instalador)) {
-    install.packages(instalador, dependencies = T)
-    break()}
-  sapply(packages, require, character = T) 
-} else {
-  sapply(packages, require, character = T) }
-library(readxl)
-library(ranger)
-library(tidymodels)
-library(parallel)
-library(doParallel)
-library(ggpubr)
+suppressWarnings({
+  if (sum(as.numeric(!packages %in% installed.packages())) != 0) {
+    instalador <- packages[!packages %in% installed.packages()]
+    for (i in 1:length(instalador)) {
+      install.packages(instalador, dependencies = TRUE)
+      break
+    }
+  }
+  sapply(packages, require, character.only = TRUE)
+})
+
 ```
 
 # Regression 
@@ -46,8 +43,8 @@ variables_inutiles = c("Anciano", "Peso", "Talla", "SG", "SG_cens", "SLP", "SLP_
 
 df2 = select(df, -all_of(variables_inutiles))
 ```
-##VARIABLE SELECTION FOR FIRST EVALUATION
-```{r SELECCION DE VARIABLES PARA PRIMERA EVAL}
+## VARIABLE SELECTION FOR FIRST EVALUATION
+```{r}
 X1.1 = df2[,2:49]
 X1.2 = df2[,61:67]
 X = bind_cols(X1.1, X1.2)
@@ -103,161 +100,6 @@ evaluate(predicciones, X$pri_eval_num_ok)
 ```
 
 ## Ajuste de hiperparámetros
-### Número de árboles
-```{r}
-# Valores evaluados
-num_trees_range <- seq(1, 400, 10)
-library(yardstick)
-
-train_errors <- rep(NA, times = length(num_trees_range))
-cv_errors    <- rep(NA, times = length(num_trees_range))
-
-for (i in seq_along(num_trees_range)){
-  
-  # Definición del modelo
-  modelo <- rand_forest(
-              mode  = "regression",
-              trees = num_trees_range[i]
-            ) %>%
-            set_engine(
-              engine = "ranger",
-              seed   = 123
-            )
-  
-  # Particiones validación cruzada
-  set.seed(1234)
-  cv_folds <- vfold_cv(
-                data    = X,
-                v       = nrow(X),
-                repeats = 1
-              )
-  
-  # Ejecución validación cruzada
-  validacion_fit <- fit_resamples(
-                      preprocessor = pri_eval_num_ok ~ .,
-                      object       = modelo,
-                      resamples    = cv_folds,
-                      metrics      = metric_set(rmse)
-                    )
-  
-  # Extraer la métrica de validación 
-  cv_error <- collect_metrics(validacion_fit)$mean
-  
-  # Predicción datos train
-  modelo_fit <- modelo %>% fit(pri_eval_num_ok ~ ., data = X)
-  predicciones_train <- predict(
-                          modelo_fit,
-                          new_data = X
-                        )
-  predicciones_train <- predicciones_train$.pred
-  
-  train_error <- sqrt(mean((predicciones_train - X$pri_eval_num_ok)^2))
-  
-  # Resultados
-  train_errors[i] <- train_error
-  cv_errors[i]    <- cv_error
-  
-}
-
-# Gráfico con la evolución de los errores
-df_resulados <- data.frame(n_arboles = num_trees_range, train_errors, cv_errors)
-ggplot(data = df_resulados) +
-  geom_line(aes(x = num_trees_range, y = train_errors, color = "train rmse")) + 
-  geom_line(aes(x = num_trees_range, y = cv_errors, color = "cv rmse")) +
-  geom_vline(xintercept = num_trees_range[which.min(cv_errors)],
-             color = "firebrick",
-             linetype = "dashed") +
-  labs(
-    title = "Evolución del cv-error vs número árboles",
-    x     = "número de árboles",
-    y     = "cv-error (rmse)",
-    color = ""
-  ) +
-  theme_bw() +
-  theme(legend.position = "bottom")
-```
-```{r}
-paste("Valor óptimo de num.trees:", num_trees_range[which.min(cv_errors)])
-```
-### Mtry
-```{r}
-# Valores evaluados
-mtry_range <- seq(1, ncol(X)-1)
-
-
-train_errors <- rep(NA, times = length(mtry_range))
-cv_errors    <- rep(NA, times = length(mtry_range))
-
-for (i in seq_along(mtry_range)){
-  
-  # Definición del modelo
-  modelo <- rand_forest(
-              mode  = "regression",
-              trees = 100,
-              mtry  = mtry_range[i]
-            ) %>%
-            set_engine(
-              engine = "ranger",
-              seed   = 123
-            )
-  
-  # Particiones validación cruzada
-  set.seed(1234)
-  cv_folds <- vfold_cv(
-                data    = X,
-                v       = nrow(X),
-                repeats = 1
-              )
-  
-  # Ejecución validación cruzada
-  validacion_fit <- fit_resamples(
-                      preprocessor = pri_eval_num_ok ~ .,
-                      object       = modelo,
-                      resamples    = cv_folds,
-                      metrics      = metric_set(rmse)
-                    )
-  
-  # Extraer datos de validación
-  cv_error <- collect_metrics(validacion_fit)$mean
-  
-  # Predicción datos train
-  modelo_fit <- modelo %>% fit(pri_eval_num_ok ~ ., data = X)
-  predicciones_train <- predict(
-                          modelo_fit,
-                          new_data = X
-                        )
-  predicciones_train <- predicciones_train$.pred
-  
-  train_error <- sqrt(mean((predicciones_train - X$pri_eval_num_ok)^2))
-  
-  # Resultados
-  train_errors[i] <- train_error
-  cv_errors[i]    <- cv_error
-  
-}
-
-# Gráfico con la evolución de los errores
-df_resulados <- data.frame(mtry = mtry_range, train_errors, cv_errors)
-ggplot(data = df_resulados) +
-  geom_line(aes(x = mtry_range, y = train_errors, color = "train error")) + 
-  geom_line(aes(x = mtry_range, y = cv_errors, color = "cv error")) +
-  geom_vline(xintercept =  mtry_range[which.min(cv_errors)],
-             color = "firebrick",
-             linetype = "dashed") +
-  labs(
-    title = "Evolución del out-of-bag-error vs mtry",
-    x     = "mtry",
-    y     = "cv-error (mse)",
-    color = ""
-  ) +
-  theme_bw() +
-  theme(legend.position = "bottom")
-```
-
-```{r}
-paste("Valor óptimo de mtry:", mtry_range[which.min(cv_errors)])
-```
-
 ### Grid-search con LOO
 ```{r}
 # DEFINICIÓN DEL MODELO Y DE LOS HIPERPARÁMETROS A OPTIMIZAR
@@ -365,7 +207,7 @@ rmse_test  <- rmse(
               )
 rmse_test
 ```
-##Importancia de predictores
+## Importancia de predictores
 
 Importancia por pureza de nodos
 
@@ -402,6 +244,27 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none",axis.text = element_text(size = 5))
 ```
+## TOP 15
+
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (pureza de nodos)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))
+```
 
 ## Importancia por permutación
 Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
@@ -436,6 +299,26 @@ coord_flip() +
 theme_bw() +
 theme(legend.position = "none",axis.text = element_text(size = 5))
 ```
+## TOP 15
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          slice_max(order_by = importancia, n = 15)  # Usamos slice_max que es más explícito
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (permutación)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))
+```
 
 Ambas estrategias identifican SII_2C, PLR_1C, SII_1C, NLR_1C y N_ciclos como los predictores más influyentes, acorde a los datos de entrenamiento.
 
@@ -462,13 +345,65 @@ variables_inutiles = c("Anciano", "Peso", "Talla", "SG", "SG_cens", "SLP", "SLP_
 
 df2 = select(df, -all_of(variables_inutiles))
 ```
-
-##VARIABLE SELECTION FOR FIRST EVALUATION
+## VARIABLE SELECTION FOR FIRST EVALUATION
 ```{r SELECCION DE VARIABLES PARA PRIMERA EVAL}
 X1.1 = df2[,2:49]
 X1.2 = df2[,61:67]
 X2 = bind_cols(X1.1, X1.2)
 X2$pri_eval_num_ok <- as.factor(df2$pri_eval_num_ok)
+```
+
+## Modelo sin hiperparámetros
+
+```{r}
+# Creación y entrenamiento del modelo
+# ==============================================================================
+set.seed(123)
+modelo_sin_ajustar  <- ranger(
+            formula   = pri_eval_num_ok ~ .,
+            data      = X2,
+            num.trees = 10,
+            seed      = 123
+           )
+
+print(modelo_sin_ajustar)
+```
+
+```{r}
+predict(modelo_sin_ajustar, X2) %>% head
+```
+## Ealuating the model
+```{r}
+# Training data
+p_train <- predict(modelo_sin_ajustar, X2)
+
+# Evaluation data frame (Training)
+eval_train <- data.frame(obs=X2$pri_eval_num_ok,
+                         pred=p_train)
+head(eval_train)
+
+predicciones_ <- p_train$predictions
+
+```
+
+```{r}
+# Generar predicciones
+predicciones <- predict(modelo_sin_ajustar, data = X2)
+
+# Asegúrate de que las predicciones están en el formato adecuado
+# Extrae las predicciones de clase si es un problema de clasificación
+predicciones_ <- predicciones$predictions
+
+# Crear un marco de datos para evaluación que incluya observaciones y predicciones
+eval_train <- data.frame(
+  obs = X2$pri_eval_num_ok,  # las observaciones reales
+  pred = as.factor(predicciones_)  # asegúrate de convertir las predicciones a factor
+)
+
+# Matriz de confusión usando yardstick
+mat_confusion <- conf_mat(data = eval_train, truth = obs, estimate = pred)
+mat_confusion
+
 ```
 
 ## Mejora de los hiperparámetros
@@ -601,7 +536,7 @@ El resultado de predict(type="prob") es un dataframe con una fila por observaci�
 
 Por defecto, predict() asigna cada nueva observación a la clase con mayor probabilidad (en caso de empate se asigna de forma aleatoria). Sin embargo, este no tiene por qué ser el comportamiento deseado en todos los casos.
 
-##Importancia de predictores
+## Importancia de predictores
 
 Importancia por pureza de nodos
 
@@ -640,7 +575,30 @@ theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
 ```
 
-##Importancia por permutación
+## TOP 15
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (pureza de nodos)") +
+geom_col() +
+scale_fill_viridis_c() +  # Usa un gradiente de color para representar la importancia
+coord_flip() +  # Invierte los ejes para mejor visualización de las etiquetas
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 12))  # Ajusta el tamaño del texto para mejor legibilidad
+```
+
+
+## Importancia por permutación
 Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
 ```{r}
 # Entrenamiento modelo
@@ -673,6 +631,28 @@ scale_fill_viridis_c() +
 coord_flip() +
 theme_bw() +
 theme(legend.position = "none", axis.text = element_text(size = 5))
+```
+
+## Top 15
+```{r}
+# Filtrar para mantener solo las 15 variables más importantes
+importancia_pred_top15 <- importancia_pred %>%
+                          arrange(desc(importancia)) %>%
+                          top_n(15, importancia)
+
+# Gráfico de las 15 variables más importantes
+ggplot(
+  data = importancia_pred_top15,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "Predictor", title = "Importancia de los predictores (permutación)") +
+geom_col() +
+scale_fill_viridis_c() +  # Utiliza una escala de color para representar la importancia
+coord_flip() +  # Invierte los ejes para una mejor visualización de los nombres de los predictores
+theme_bw() +  # Utiliza un tema blanco y negro para el gráfico
+theme(legend.position = "none", axis.text = element_text(size = 12))  # Ajusta el tamaño del texto para mejorar la legibilidad
 ```
 
 Ambas estrategias identifican SII_2C, PLR_1C, SII_1C, NLR_1C, PLR_pre, N_ciclos y Linf_tot,  como los predictores más influyentes, acorde a los datos de entrenamiento.
