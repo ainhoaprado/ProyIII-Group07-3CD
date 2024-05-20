@@ -1,0 +1,325 @@
+---
+title: "PLS"
+author: "G7"
+date: "2024-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(ropls)
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(pls)
+library(tibble) 
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# LECTURA DE DATOS Y BORRADO DE VARIABLES INÚTILES
+```{r}
+df <- read_excel("df_definitivo-2.xlsx", sheet = "Copia de datos")
+rownames(df) = df$id
+df$Afectacion_ganglionar = as.numeric(df$Afectacion_ganglionar)
+df$Afectacion_metastasica = as.numeric(df$Afectacion_metastasica)
+df$Tamaño_tumor = as.numeric(df$Tamaño_tumor)
+df$Grado_tox = as.numeric(df$Grado_tox)
+df$SII_pre = log(df$SII_pre)
+df$SII_1C = log(df$SII_1C)
+df$SII_2C = log(df$SII_2C)
+df$SII_1eval = log(df$SII_1eval)
+
+variables_inutiles = c("Anciano", "Peso", "Talla", "SG", "SG_cens", "SLP", "SLP_cens", "Tipo_tox", "NLR2C_corte4o5")
+df2 = select(df, -all_of(variables_inutiles))
+```
+
+# SELECCIÓN DE VARIABLES PARA PRIMERA EVAL
+```{r SELECCION DE VARIABLES PARA PRIMERA EVAL}
+
+#colnames(df2)
+X1.1 = df2[,2:49]
+X1.2 = df2[,61:67]
+X = bind_cols(X1.1, X1.2)
+Y = as.matrix(df2['pri_eval_num_ok'])
+
+```
+
+# SELECCIÓN DE VARIABLES PARA MEJOR RESPUESTA
+```{r SELECCIÓN DE VARIABLES PARA MEJOR RESPUESTA}
+
+#colnames(df2)
+X2 = df2[,2:67]
+Y2 = as.matrix(df2["mejor_resp_num_ok"])
+
+```
+
+# CENTRAR Y ESCALAR LAS VARIABLES PARA PRIMERA EVAL
+
+Escalamos tanto la matriz **X** como la **Y**, ya que las variables están medidas en distintas unidades. El escalado y centrado se realiza desde la propia función *opls*.
+
+No dividimos los datos en entrenamiento y test porque tenemos 34 (muy pocas) observaciones. Estimaremos el número de componentes óptimo mediante validación cruzada y optaremos por el procedimiento "leave-one-out". 
+```{r}
+mypls = opls(x = X, y = Y, predI = NA, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+De acuerdo con el criterio de la función *opls*, el número óptimo de componentes sería 1. No obstante, vamos a generar nuestro propio gráfico para estimar mejor el número óptimo de componentes del modelo. 
+
+```{r}
+mypls_2 = opls(x = X, y = Y, predI = 33, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+
+```{r}
+
+#mypls_2@modelDF  ## Para recuperar la información de cada componente
+plot(1:33, mypls_2@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "blue3",
+     lwd = 2, xlab = "Components", ylab = "",
+     main = "PLS model for predicting First Evaluation", ylim = c(-1,1))
+lines(1:33, mypls_2@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "red3",
+      lwd = 2)
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, 
+       col = c("blue3", "red3"), bty = "n")
+
+```
+
+Las conclusiones que podemos extraer de este gráfico es que solamente eligiendo 1, 2, 32, 33 y 34  componentes el modelo predeciria mejor que uno aleatorio y que las estimaciones serian "válidas". Es lo mismo decir que hacer un modelo que tenga un número de componentes que no sean esas no seria capaz de predecir correctamente la variable respuesta (primera evaluacion) y puede ser poco fiable o incluso inútil en la práctica.
+
+No tiene sentido escoger más de 2 componentes principales porque seleccionar los otros números (32, 33 y 34) de componentes principales provocaría un sobreajuste del modelo y la interpretación sería casi imposible. También sería incoherente seleccionar números de componentes principales que no predigan nada. 
+
+Al menos seleccionando 1 o 2 componentes el modelo es capaz de explicar correctamente entre el 29.5% y el 17.8% de la varianza de la variable primera eval. Si atendemos a los valores de $R^2$ tiene más sentido elegir 2 componentes principales ya que este valor aumenta considerablemente si elegimos 2. 
+
+Entendemos que este modelo al tener tan pocas observaciones no va a generalizar demasiado bien para la llegada de nuevas observaciones. Es por ello que elegiremos finalmente 2 componentes principales para este modelo pues nos importa de cierto modo la capacidad predictiva del modelo. 
+
+```{r}
+mypls = opls(x = X, y = Y, predI = 2, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+Para estudiar los datos anómalos haremos uso de la T2 de Hotelling y la Suma de Cuadrados Residual. 
+
+En el PCA observabamos que el individuo 11 es un dato atipico extremo. Pero igualmente lo representaremos en el gráfico de la T2 de hotelling. 
+
+```{r}
+misScores = mypls@scoreMN
+varT = apply(misScores, 2, var)
+miT2 = colSums(t(misScores**2) / varT)
+N = nrow(X)
+A = 2
+F95 = A*(N**2 - 1)/(N*(N - A)) * qf(0.95, A, N-A); F95
+F99 = A*(N**2 - 1)/(N*(N - A)) * qf(0.99, A, N-A); F99
+plot(1:length(miT2), miT2, type = "l", xlab = "pacientes", ylab = "T2",
+     main = "PLS: T2-Hotelling", ylim = c(0,15))
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```
+Pero al haber hecho previamente una transformación logaritmica sale por debajo del límite del 99% por lo que ya no se considera un valor extremo y no lo extraeremos del modelo. 
+
+```{r}
+myT = mypls@scoreMN
+myP = mypls@loadingMN
+myE = scale(X) - myT%*%t(myP) 
+mySCR = rowSums(myE^2)   # SPE 
+plot(1:length(mySCR), mySCR, type = "l", main = "PLS: Distancia SCR al modelo", 
+     ylab = "SCR", xlab = "pacientes", ylim = c(0,100))
+g = var(mySCR)/(2*mean(mySCR))
+h = (2*mean(mySCR)^2)/var(mySCR)
+chi2lim = g*qchisq(0.95, df = h)
+abline(h = chi2lim, col = "orange", lty = 2)
+chi2lim99 = g*qchisq(0.99, df = h)
+abline(h = chi2lim99, col = "red3", lty = 2)
+```
+Si hacemos uso de la SCR podemos ver que hay 3 observaciones mal explicadas por el modelo, pero como exceden ligeramente el limite del 95% las dejaremos presentes. 
+
+
+```{r}
+plot(x = mypls, typeVc = "x-score", parCompVi = c(1, 2), parLabVc = rownames(X), parPaletteVc = NA, parTitleL = TRUE, parCexMetricN = NA)
+```
+Si nos fijamos en el gráfico de scores podemos ver que la primera componente principal si que separa bastante bien los que son los del grupo 1 y 3. Se puede entender esta diferenciación ya que estos son los que si que parecen responder correctamente y los que la enfermedad sigue progresando. Sin embargo, los que tienen una etiqueta de enfermedad estable están un poco entre medias y también es lógico. 
+
+```{r}
+plot(x = mypls, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+A la vista del gráfico de Loadings podemos ver que los que tienen una etiqueta de 3 tienen valores más altos de PLR y NLR en el primer y segundo ciclo y muy bajos de PNI, ALI y albúminas antes del primer ciclo con Pembrolizumab. 
+
+```{r}
+plot(x = mypls, typeVc = "xy-weight",
+     parCexN = 0.5, parCompVi = c(1, 2), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+
+```{r}
+
+VIP = data.frame(sort(mypls@vipVn))
+bottom_10 <- data.frame(variables = rownames(VIP)[1:10], vip = VIP[1:10, ])
+top_10 <- data.frame(variables = rownames(VIP)[46:55], vip = VIP[46:55, ])
+
+grafico_barras <- ggplot(top_10, aes(x = reorder(variables, vip), y = vip)) + geom_bar(stat = "identity", fill = "skyblue") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  labs(x = "Variable", y = "VIP", title = "Top 10 VIP variables")
+
+grafico_barras2 <- ggplot(bottom_10, aes(x = reorder(variables, vip), y = vip)) + geom_bar(stat = "identity", fill = "skyblue") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  labs(x = "Variable", y = "VIP", title = "Bottom 10 VIP variables")
+
+print(grafico_barras)
+print(grafico_barras2)
+
+
+```
+Es lógico pensar que el valor SII contribuirá más a la hora de decidir qué etiqueta ponerle a la evaluación de la enfermedad de un paciente. Este indicador se utiliza para evaluar la inflamación sistémica y su relación con el pronóstico en pacientes con cáncer y otras condiciones médicas. Un mayor valor de SII se ha asociado con: peor pronóstico, mayor inflamación sistémica y respuesta menos favorable al tratamiento. Lo mismo ocurre con el indicador PLR (platelet/lymphocite ratio) y el indicador NLR (neutrophil/lymphocite ratio), que irian disminuyendo si el paciente va haciendo frente al cáncer, pero si va evolucionando la enfermedad irán aumentando. 
+
+También podriamos pensar que es lógico que la toxicidad del tratamiento, es decir, los efectos secundarios, podría tener una gran contribución a la determinación de la evolución de la enfermedad ya que las personas que presentan toxicidad tienen una evolución menos favorable. 
+
+La hemoglobina baja se asocia con una progresión negativa del cáncer. Los valores más bajos de esta podrian sugerir que las etiquetas para estos pacientes son de progresión de la enfermedad. 
+
+Los más ambiguos serían el número de ciclos y la histologia, que para confirmar que hay alguna relación entre estas variables y la variable respuesta se representan los siguientes gráficos. 
+
+*realizar un gráfico que muestre la relación entre pri_eval_num_ok y número de ciclos*
+
+*realizar un gráfico que muestre la relación entre pri_eval_num_ok y histologia*
+
+Por el contrario, las variables que menos contribuyen resultan sorprendentes porque podriamos pensar que el tamaño del tumor si que afecta a la evolución del cáncer al igual que la afectación metastásica. 
+
+Podriamos entender como lógica la poca contribución de la variable ECOG porque no podria haber cierta independencia entre esta variable y la variable respuesta. Una persona de mayor edad con un cáncer es normal que se encuentre peor y necesite más cuidados por parte de otra persona y una con menor edad aunque tenga un cáncer avanzado podria hacer cosas por si mismo. De igual manera podriamos creer que hay cierta independencia entre enfermedades de neurodegenrativas, cardiopatias o diabetes. 
+
+En cuanto a los neutrofilos y los leucocitos sería coherente pensar que guardan relación con la variable respuesta ya que se trata de la cantidad de tipos de globulos blancos e indicarian que se está haciendo frente a la enfermedad o si existe algún tipo de problema inmunológico. 
+
+La cantidad de LDH determinaria si hay daño en algún tejido, como todos tienen daño en el pulmón de manera similar pues puede que resulte más irrelevante.
+
+# MEDIDAS DE PREDICCIÓN PARA PRIMERA EVALUACIÓN
+
+```{r}
+Ypred = predict(mypls)
+residuos = Y-Ypred
+myRMSE = sqrt(colMeans(residuos^2))
+CVrmse = myRMSE/colMeans(Y)
+myRMSE 
+CVrmse
+```
+El RMSE expresa la diferencia entre los valores predichos por nuestro modelo y los observados. Es decir, en promedio el valor difiere +/- 0.3771 del valor real. Es normal porque los valores que se observan son números enteros (1, 2 y 3) y los valores que se predicen son números reales entre el 1 y el 3. 
+
+El CVrmse que obtenemos es de 0.2137 lo que significa que las predicciones del modelo tienen un error del 21% en relación con la escala de los datos originales. Con este valor podriamos decir que el modelo tiene un rendimiento moderado-aceptable.  
+
+```{r}
+for (i in 1:ncol(Y)) {
+  plot(Y[,i], Ypred[,i], asp = 1, main = colnames(Y)[i],
+     xlab = "observado", ylab = "predicho")
+abline(a=0, b=1, col = "red3", lwd = 2, lty = 2)
+}
+```
+En el siguiente gráfico podemos observar como la clase 1 y 3 si que pueden ser diferenciadas por el modelo y que la clase 2 le cuesta más predecirla ya que se produce solapamiento con ambas clases. Esto podria darnos a entender que quizas la asignación de clases es un poco ambigua pero se podria entender porque en contextos médicos hay muchos otros factores imposibles de recoger que afectan a la evolución de la enfermedad. 
+
+# CENTRAR Y ESCALAR LAS VARIABLES PARA MEJOR RESPUESTA
+
+```{r}
+mypls2 = opls(x = X2, y = Y2, predI = NA, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+De acuerdo con el criterio de la función *opls*, el número óptimo de componentes sería 1. No obstante, vamos a generar nuestro propio gráfico para estimar mejor el número óptimo de componentes del modelo. 
+
+```{r}
+mypls_2.2 = opls(x = X2, y = Y2, predI = 33, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+```{r}
+plot(1:33, mypls_2.2@modelDF$`R2Y(cum)`, type = "o", pch = 16, col = "blue3",
+     lwd = 2, xlab = "Components", ylab = "",
+     main = "PLS model for predicting First Evaluation", ylim = c(-1,1))
+lines(1:33, mypls_2.2@modelDF$`Q2(cum)`, type = "o", pch = 16, col = "red3",
+      lwd = 2)
+legend("bottomleft", c("R2Y", "Q2"), lwd = 2, 
+       col = c("blue3", "red3"), bty = "n")
+```
+Las conclusiones que podemos extraer de este gráfico es que solamente eligiendo 1-5 y 22-34 componentes el modelo predeciria mejor que uno aleatorio y que las estimaciones serian "válidas". Es lo mismo decir que hacer un modelo que tenga un número de componentes que no sean esas no seria capaz de predecir correctamente la variable respuesta (mejor respuesta) y puede ser poco fiable o incluso inútil en la práctica.
+
+No tiene sentido escoger más de 5 componentes principales porque seleccionar los otros números mayores (22, 23, 24, 25, 26,27, 28, 29, 20, 31, 32, 33 y 34) de componentes principales provocaría un sobreajuste del modelo y la interpretación sería casi imposible. También sería incoherente seleccionar números de componentes principales que no predigan nada. 
+
+Si atendemos a los valores de $R^2$ tiene más sentido elegir 4 componentes principales ya que este valor aumenta considerablemente si elegimos 4. 
+
+Entendemos que este modelo al tener tan pocas observaciones no va a generalizar demasiado bien para la llegada de nuevas observaciones. Es por ello que elegiremos finalmente 4 componentes principales para este modelo pues nos importa de cierto modo la capacidad predictiva del modelo. 
+
+```{r}
+mypls_2 = opls(x = X2, y = Y2, predI = 4, crossvalI = nrow(X), scaleC = "standard", fig.pdfC = "none")
+```
+
+Para estudiar los datos anómalos haremos uso de la T2 de Hotelling y la Suma de Cuadrados Residual. 
+
+En el PCA observabamos que el individuo 11 es un dato atipico extremo. Pero igualmente lo representaremos en el gráfico de la T2 de hotelling. 
+
+```{r}
+misScores = mypls_2@scoreMN
+varT = apply(misScores, 2, var)
+miT2 = colSums(t(misScores**2) / varT)
+N = nrow(X2)
+A = 2
+F95 = A*(N**2 - 1)/(N*(N - A)) * qf(0.95, A, N-A); F95
+F99 = A*(N**2 - 1)/(N*(N - A)) * qf(0.99, A, N-A); F99
+plot(1:length(miT2), miT2, type = "l", xlab = "pacientes", ylab = "T2",
+     main = "PLS: T2-Hotelling", ylim = c(0,15))
+abline(h = F95, col = "orange", lty = 2, lwd = 2)
+abline(h = F99, col = "red3", lty = 2, lwd = 2)
+```
+El individuo 11 sigue saliendo como dato extremo, aun realizando transformaciones logarítmicas. 
+
+```{r}
+myT = mypls_2@scoreMN
+myP = mypls_2@loadingMN
+myE = scale(X2) - myT%*%t(myP) 
+mySCR = rowSums(myE^2)   # SPE 
+plot(1:length(mySCR), mySCR, type = "l", main = "PLS: Distancia SCR al modelo", 
+     ylab = "SCR", xlab = "pacientes", ylim = c(0,100))
+g = var(mySCR)/(2*mean(mySCR))
+h = (2*mean(mySCR)^2)/var(mySCR)
+chi2lim = g*qchisq(0.95, df = h)
+abline(h = chi2lim, col = "orange", lty = 2)
+chi2lim99 = g*qchisq(0.99, df = h)
+abline(h = chi2lim99, col = "red3", lty = 2)
+```
+Si hacemos uso de la SCR podemos ver que hay 1 observación mal explicada por el modelo, pero como excede ligeramente el limite del 95% la dejaremos presente. 
+
+```{r}
+plot(x = mypls_2, typeVc = "x-score", parCompVi = c(1, 2), parLabVc = rownames(X), parPaletteVc = NA, parTitleL = TRUE, parCexMetricN = NA)
+```
+
+```{r}
+plot(x = mypls_2, typeVc = "x-loading",
+     parCexN = 0.8, parCompVi = c(1, 2), parPaletteVc = NA,
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+```{r}
+plot(x = mypls_2, typeVc = "xy-weight",
+     parCexN = 0.5, parCompVi = c(1, 2), parPaletteVc = NA, 
+     parTitleL = TRUE, parCexMetricN = NA)
+```
+```{r}
+VIP2 = data.frame(sort(mypls_2@vipVn))
+bottom_10 <- data.frame(variables = rownames(VIP2)[1:10], vip = VIP[1:10, ])
+top_10 <- data.frame(variables = rownames(VIP2)[46:55], vip = VIP[46:55, ])
+
+grafico_barras <- ggplot(top_10, aes(x = reorder(variables, vip), y = vip)) + geom_bar(stat = "identity", fill = "skyblue") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  labs(x = "Variable", y = "VIP", title = "Top 10 VIP variables")
+
+grafico_barras2 <- ggplot(bottom_10, aes(x = reorder(variables, vip), y = vip)) + geom_bar(stat = "identity", fill = "skyblue") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  labs(x = "Variable", y = "VIP", title = "Bottom 10 VIP variables")
+
+print(grafico_barras)
+print(grafico_barras2)
+```
+# MEDIDAS DE PREDICCIÓN PARA VARIABLE MEJOR RESPUESTA
+
+```{r}
+Ypred2 = predict(mypls_2)
+residuos2 = Y2-Ypred2
+myRMSE2 = sqrt(colMeans(residuos2^2))
+CVrmse2 = myRMSE2/colMeans(Y2)
+myRMSE2 
+CVrmse2
+```
+El RMSE expresa la diferencia entre los valores predichos por nuestro modelo y los observados. Es decir, en promedio el valor difiere +/- 0.2638 del valor real. Es normal porque los valores que se observan son números enteros (1, 2 y 3) y los valores que se predicen son números reales entre el 1 y el 3. 
+
+El CVrmse que obtenemos es de 0.195 lo que significa que las predicciones del modelo tienen un error del 19.5% en relación con la escala de los datos originales. Con este valor podriamos decir que el modelo tiene un rendimiento moderado-aceptable.
+
+```{r}
+for (i in 1:ncol(Y)) {
+  plot(Y2[,i], Ypred2[,i], asp = 1, main = colnames(Y2)[i],
+     xlab = "observado", ylab = "predicho")
+abline(a=0, b=1, col = "red3", lwd = 2, lty = 2)
+}
+```
+

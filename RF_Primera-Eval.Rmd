@@ -1,0 +1,686 @@
+---
+title: "RF_2"
+author: "Ainhoa"
+date: "2024-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+packages <- c('tidyverse','rpart','rpart.plot','gtools','Rmisc','scales','viridis','caret','AMR','randomForest','fastDummies','rattle','xgboost','ggpubr','reshape2','mlbench')
+
+if(sum(as.numeric(!packages %in% installed.packages())) != 0){
+  instalador <- packages[!packages %in% installed.packages()]
+  for(i in 1:length(instalador)) {
+    install.packages(instalador, dependencies = T)
+    break()}
+  sapply(packages, require, character = T) 
+} else {
+  sapply(packages, require, character = T) }
+library(readxl)
+library(ranger)
+library(tidymodels)
+library(parallel)
+library(doParallel)
+library(ggpubr)
+```
+
+# Regression 
+## Preparing the data
+```{r}
+df <- read_excel("df_definitivo-2.xlsx", sheet = "Copia de datos")
+rownames(df) = df$id
+df$Afectacion_ganglionar = as.numeric(df$Afectacion_ganglionar)
+df$Afectacion_metastasica = as.numeric(df$Afectacion_metastasica)
+df$Tamaño_tumor = as.numeric(df$Tamaño_tumor)
+df$Grado_tox = as.numeric(df$Grado_tox)
+df$SII_pre = log(df$SII_pre)
+df$SII_1C = log(df$SII_1C)
+df$SII_2C = log(df$SII_2C)
+df$SII_1eval = log(df$SII_1eval)
+
+variables_inutiles = c("Anciano", "Peso", "Talla", "SG", "SG_cens", "SLP", "SLP_cens", "Tipo_tox", "NLR2C_corte4o5")
+
+df2 = select(df, -all_of(variables_inutiles))
+```
+##VARIABLE SELECTION FOR FIRST EVALUATION
+```{r SELECCION DE VARIABLES PARA PRIMERA EVAL}
+X1.1 = df2[,2:49]
+X1.2 = df2[,61:67]
+X = bind_cols(X1.1, X1.2)
+X$pri_eval_num_ok <- df2$pri_eval_num_ok
+```
+
+## Modelo sin ajuste de parametros-FIRST EVALUATION-
+```{r}
+# Creación y entrenamiento del modelo
+# ==============================================================================
+set.seed(123)
+modelo  <- ranger(
+            formula   = pri_eval_num_ok ~ .,
+            data      = X,
+            num.trees = 10,
+            seed      = 123
+           )
+
+print(modelo)
+```
+```{r}
+predict(modelo, X) %>% head
+```
+## Ealuating the model
+```{r}
+# Training data
+p_train <- predict(modelo, X)
+
+# Evaluation data frame (Training)
+eval_train <- data.frame(obs=X$pri_eval_num_ok,
+                         pred=p_train)
+head(eval_train)
+
+predicciones <- p_train$predictions
+```
+
+```{r}
+# Evaluation function
+evaluate <- function(pred, obs) {
+  mse <- mean((pred - obs)^2)
+  rmse_ <- sqrt(mse)
+  mae <- mean(abs(pred - obs))
+  r_squared <- 1 - (sum((obs - pred)^2) / sum((obs - mean(obs))^2))
+
+  cat("MSE:", mse, "\n")
+  cat("RMSE:", rmse_, "\n")
+  cat("MAE:", mae, "\n")
+  cat("R-squared:", r_squared, "\n")
+}
+
+# Using the evaluation function
+evaluate(predicciones, X$pri_eval_num_ok)
+```
+
+## Ajuste de hiperparámetros
+### Número de árboles
+```{r}
+# Valores evaluados
+num_trees_range <- seq(1, 400, 10)
+library(yardstick)
+
+train_errors <- rep(NA, times = length(num_trees_range))
+cv_errors    <- rep(NA, times = length(num_trees_range))
+
+for (i in seq_along(num_trees_range)){
+  
+  # Definición del modelo
+  modelo <- rand_forest(
+              mode  = "regression",
+              trees = num_trees_range[i]
+            ) %>%
+            set_engine(
+              engine = "ranger",
+              seed   = 123
+            )
+  
+  # Particiones validación cruzada
+  set.seed(1234)
+  cv_folds <- vfold_cv(
+                data    = X,
+                v       = nrow(X),
+                repeats = 1
+              )
+  
+  # Ejecución validación cruzada
+  validacion_fit <- fit_resamples(
+                      preprocessor = pri_eval_num_ok ~ .,
+                      object       = modelo,
+                      resamples    = cv_folds,
+                      metrics      = metric_set(rmse)
+                    )
+  
+  # Extraer la métrica de validación 
+  cv_error <- collect_metrics(validacion_fit)$mean
+  
+  # Predicción datos train
+  modelo_fit <- modelo %>% fit(pri_eval_num_ok ~ ., data = X)
+  predicciones_train <- predict(
+                          modelo_fit,
+                          new_data = X
+                        )
+  predicciones_train <- predicciones_train$.pred
+  
+  train_error <- sqrt(mean((predicciones_train - X$pri_eval_num_ok)^2))
+  
+  # Resultados
+  train_errors[i] <- train_error
+  cv_errors[i]    <- cv_error
+  
+}
+
+# Gráfico con la evolución de los errores
+df_resulados <- data.frame(n_arboles = num_trees_range, train_errors, cv_errors)
+ggplot(data = df_resulados) +
+  geom_line(aes(x = num_trees_range, y = train_errors, color = "train rmse")) + 
+  geom_line(aes(x = num_trees_range, y = cv_errors, color = "cv rmse")) +
+  geom_vline(xintercept = num_trees_range[which.min(cv_errors)],
+             color = "firebrick",
+             linetype = "dashed") +
+  labs(
+    title = "Evolución del cv-error vs número árboles",
+    x     = "número de árboles",
+    y     = "cv-error (rmse)",
+    color = ""
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+```{r}
+paste("Valor óptimo de num.trees:", num_trees_range[which.min(cv_errors)])
+```
+### Mtry
+```{r}
+# Valores evaluados
+mtry_range <- seq(1, ncol(X)-1)
+
+
+train_errors <- rep(NA, times = length(mtry_range))
+cv_errors    <- rep(NA, times = length(mtry_range))
+
+for (i in seq_along(mtry_range)){
+  
+  # Definición del modelo
+  modelo <- rand_forest(
+              mode  = "regression",
+              trees = 100,
+              mtry  = mtry_range[i]
+            ) %>%
+            set_engine(
+              engine = "ranger",
+              seed   = 123
+            )
+  
+  # Particiones validación cruzada
+  set.seed(1234)
+  cv_folds <- vfold_cv(
+                data    = X,
+                v       = nrow(X),
+                repeats = 1
+              )
+  
+  # Ejecución validación cruzada
+  validacion_fit <- fit_resamples(
+                      preprocessor = pri_eval_num_ok ~ .,
+                      object       = modelo,
+                      resamples    = cv_folds,
+                      metrics      = metric_set(rmse)
+                    )
+  
+  # Extraer datos de validación
+  cv_error <- collect_metrics(validacion_fit)$mean
+  
+  # Predicción datos train
+  modelo_fit <- modelo %>% fit(pri_eval_num_ok ~ ., data = X)
+  predicciones_train <- predict(
+                          modelo_fit,
+                          new_data = X
+                        )
+  predicciones_train <- predicciones_train$.pred
+  
+  train_error <- sqrt(mean((predicciones_train - X$pri_eval_num_ok)^2))
+  
+  # Resultados
+  train_errors[i] <- train_error
+  cv_errors[i]    <- cv_error
+  
+}
+
+# Gráfico con la evolución de los errores
+df_resulados <- data.frame(mtry = mtry_range, train_errors, cv_errors)
+ggplot(data = df_resulados) +
+  geom_line(aes(x = mtry_range, y = train_errors, color = "train error")) + 
+  geom_line(aes(x = mtry_range, y = cv_errors, color = "cv error")) +
+  geom_vline(xintercept =  mtry_range[which.min(cv_errors)],
+             color = "firebrick",
+             linetype = "dashed") +
+  labs(
+    title = "Evolución del out-of-bag-error vs mtry",
+    x     = "mtry",
+    y     = "cv-error (mse)",
+    color = ""
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+paste("Valor óptimo de mtry:", mtry_range[which.min(cv_errors)])
+```
+
+### Grid-search con LOO
+```{r}
+# DEFINICIÓN DEL MODELO Y DE LOS HIPERPARÁMETROS A OPTIMIZAR
+# ==============================================================================
+modelo <- rand_forest(
+             mode  = "regression",
+             mtry  = tune(),
+             trees = tune()
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            max.depth  = tune(),
+            importance = "none",
+            seed       = 123
+          )
+
+# DEFINICIÓN DEL PREPROCESADO
+# ==============================================================================
+# En este caso no hay preprocesado, por lo que el transformer solo contiene
+# la definición de la fórmula y los datos de entrenamiento.
+transformer <- recipe(
+                  formula = pri_eval_num_ok ~ .,
+                  data    =  X
+               )
+
+# DEFINICIÓN DE LA ESTRATEGIA DE VALIDACIÓN Y CREACIÓN DE PARTICIONES
+# ==============================================================================
+set.seed(1234)
+cv_folds <- vfold_cv(
+              data    = X,
+              v       = nrow(X),
+              repeats = 1,
+              strata  = pri_eval_num_ok
+            )
+
+# WORKFLOW
+# ==============================================================================
+workflow_modelado <- workflow() %>%
+                     add_recipe(transformer) %>%
+                     add_model(modelo)
+                     
+
+# GRID DE HIPERPARÁMETROS
+# ==============================================================================
+hiperpar_grid <- expand_grid(
+                  'trees'     = c(50, 100, 500, 1000, 5000),
+                  'mtry'      = c(3, 5, 7, ncol(X)-1),
+                  'max.depth' = c(1, 3, 10, 20)
+                 )
+
+# EJECUCIÓN DE LA OPTIMIZACIÓN DE HIPERPARÁMETROS
+# ==============================================================================
+cl <- makePSOCKcluster(parallel::detectCores() - 1)
+registerDoParallel(cl)
+
+grid_fit <- tune_grid(
+              object    = workflow_modelado,
+              resamples = cv_folds,
+              metrics   = metric_set(rmse),
+              grid      = hiperpar_grid
+            )
+
+stopCluster(cl)
+```
+
+```{r}
+# Mejores hiperparámetros por validación cruzada
+# ==============================================================================
+show_best(grid_fit, metric = "rmse", n = 1)
+```
+
+## Entrenar el modelo con los mejores hiperparámetros
+```{r}
+# ENTRENAMIENTO FINAL
+# =============================================================================
+mejores_hiperpar <- select_best(grid_fit, metric = "rmse")
+
+modelo_final_fit <- finalize_workflow(
+                        x = workflow_modelado,
+                        parameters = mejores_hiperpar
+                    ) %>%
+                    fit(
+                      data = X
+                    ) %>%
+                    extract_fit_parsnip()
+```
+
+```{r}
+# Error de train del modelo final
+# ==============================================================================
+predicciones <- modelo_final_fit %>%
+                predict(
+                  new_data = X,
+                  type     = "numeric"
+                )
+
+predicciones <- predicciones %>% 
+                bind_cols(X %>% dplyr::select(pri_eval_num_ok))
+
+rmse_test  <- rmse(
+                 data     = predicciones,
+                 truth    = pri_eval_num_ok,
+                 estimate = .pred,
+                 na_rm    = TRUE
+              )
+rmse_test
+```
+##Importancia de predictores
+
+Importancia por pureza de nodos
+
+En los modelos anteriores, el argumento importance se deja por defecto como "none". Esto desactiva el cálculo de importancia de predictores para reducir así el tiempo de entrenamiento. Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "impurity". Los modelos ranger calculan la impureza a partir del índice Gini en problemas de clasificación y con la varianza en regresión.
+
+```{r}
+# Entrenamiento modelo
+modelo <- rand_forest(
+             mode  = "regression"
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            importance = "impurity",
+            seed       = 123
+          )
+
+modelo <- modelo %>% finalize_model(mejores_hiperpar)
+modelo <- modelo %>% fit(pri_eval_num_ok ~., data = X)
+
+# Importancia
+importancia_pred <- modelo$fit$variable.importance %>%
+                    enframe(name = "predictor", value = "importancia")
+
+# Gráfico
+ggplot(
+  data = importancia_pred,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "predictor", title = "Importancia predictores (pureza de nodos)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none",axis.text = element_text(size = 5))
+```
+
+## Importancia por permutación
+Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
+```{r}
+# Entrenamiento modelo
+modelo <- rand_forest(
+             mode  = "regression"
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            importance = "permutation",
+            seed       = 123
+          )
+
+modelo <- modelo %>% finalize_model(mejores_hiperpar)
+modelo <- modelo %>% fit(pri_eval_num_ok ~., data = X)
+
+# Importancia
+importancia_pred <- modelo$fit$variable.importance %>%
+                    enframe(name = "predictor", value = "importancia")
+
+# Gráfico
+ggplot(
+  data = importancia_pred,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "predictor", title = "Importancia predictores (permutación)") +
+geom_col() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none",axis.text = element_text(size = 5))
+```
+
+Ambas estrategias identifican SII_2C, PLR_1C, SII_1C, NLR_1C y N_ciclos como los predictores más influyentes, acorde a los datos de entrenamiento.
+
+# Clasificación
+```{r}
+# Remove all objects from the global environment and the console
+rm(list = ls())
+cat("\014")
+```
+## Preparing the data
+```{r}
+df <- read_excel("df_definitivo-2.xlsx", sheet = "Copia de datos")
+rownames(df) = df$id
+df$Afectacion_ganglionar = as.numeric(df$Afectacion_ganglionar)
+df$Afectacion_metastasica = as.numeric(df$Afectacion_metastasica)
+df$Tamaño_tumor = as.numeric(df$Tamaño_tumor)
+df$Grado_tox = as.numeric(df$Grado_tox)
+df$SII_pre = log(df$SII_pre)
+df$SII_1C = log(df$SII_1C)
+df$SII_2C = log(df$SII_2C)
+df$SII_1eval = log(df$SII_1eval)
+
+variables_inutiles = c("Anciano", "Peso", "Talla", "SG", "SG_cens", "SLP", "SLP_cens", "Tipo_tox", "NLR2C_corte4o5")
+
+df2 = select(df, -all_of(variables_inutiles))
+```
+
+##VARIABLE SELECTION FOR FIRST EVALUATION
+```{r SELECCION DE VARIABLES PARA PRIMERA EVAL}
+X1.1 = df2[,2:49]
+X1.2 = df2[,61:67]
+X2 = bind_cols(X1.1, X1.2)
+X2$pri_eval_num_ok <- as.factor(df2$pri_eval_num_ok)
+```
+
+## Mejora de los hiperparámetros
+```{r}
+# DEFINICIÓN DEL MODELO Y DE LOS HIPERPARÁMETROS A OPTIMIZAR
+# ==============================================================================
+modelo <- rand_forest(
+             mode  = "classification",
+             mtry  = tune(),
+             trees = tune()
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            max.depth  = tune(),
+            importance = "none",
+            seed       = 123
+          )
+
+# DEFINICIÓN DEL PREPROCESADO
+# ==============================================================================
+# En este caso no hay preprocesado, por lo que el transformer solo contiene
+# la definición de la fórmula y los datos de entrenamiento.
+transformer <- recipe(
+                  formula = pri_eval_num_ok ~ .,
+                  data    =  X2
+               )
+
+# DEFINICIÓN DE LA ESTRATEGIA DE VALIDACIÓN Y CREACIÓN DE PARTICIONES
+# ==============================================================================
+set.seed(1234)
+cv_folds <- vfold_cv(
+              data    = X2,
+              v       = nrow(X2),
+              repeats = 1,
+              strata  = pri_eval_num_ok
+            )
+
+# WORKFLOW
+# ==============================================================================
+workflow_modelado <- workflow() %>%
+                     add_recipe(transformer) %>%
+                     add_model(modelo)
+                     
+
+# GRID DE HIPERPARÁMETROS
+# ==============================================================================
+hiperpar_grid <- expand_grid(
+                  'trees'     = c(50, 100, 500, 1000, 5000),
+                  'mtry'      = c(3, 5, 7, ncol(X2)-1),
+                  'max.depth' = c(1, 3, 10, 20)
+                 )
+
+# EJECUCIÓN DE LA OPTIMIZACIÓN DE HIPERPARÁMETROS
+# ==============================================================================
+cl <- makePSOCKcluster(parallel::detectCores() - 1)
+registerDoParallel(cl)
+
+grid_fit <- tune_grid(
+              object    = workflow_modelado,
+              resamples = cv_folds,
+              metrics   = metric_set(accuracy),
+              grid      = hiperpar_grid
+            )
+
+stopCluster(cl)
+```
+
+```{r}
+# Mejores hiperparámetros por validación cruzada
+# ==============================================================================
+show_best(grid_fit, metric = "accuracy", n = 1)
+```
+
+```{r}
+# ENTRENAMIENTO FINAL
+# =============================================================================
+mejores_hiperpar <- select_best(grid_fit, metric = "accuracy")
+
+modelo_final_fit <- finalize_workflow(
+                        x = workflow_modelado,
+                        parameters = mejores_hiperpar
+                    ) %>%
+                    fit(
+                      data = X2
+                    ) %>%
+                   extract_fit_parsnip
+```
+
+```{r}
+# Error de train del modelo final
+# ==============================================================================
+predicciones <- modelo_final_fit %>%
+                predict(new_data = X2)
+
+predicciones <- predicciones %>% 
+                bind_cols(X2 %>% dplyr::select(pri_eval_num_ok))
+
+accuracy_test  <- accuracy(
+                     data     = predicciones,
+                     truth    = pri_eval_num_ok,
+                     estimate = .pred_class,
+                     na_rm    = TRUE
+                  )
+accuracy_test
+```
+
+```{r}
+mat_confusion <- predicciones %>%
+                 conf_mat(
+                   truth     = pri_eval_num_ok,
+                   estimate  = .pred_class
+                 )
+mat_confusion
+```
+
+## Predicción de probabilidades
+La mayoría de implementaciones de Random Forest, entre ellas la de ranger, permiten predecir probabilidades cuando se trata de problemas de clasificación. Es importante entender cómo se calculan estos valores para interpretarlos y utilizarlos correctamente.
+
+En el ejemplo anterior, al aplicar predict() se devuelve Si (ventas elevadas) o No (ventas bajas) para cada observación de test. Sin embargo, no se dispone de ningún tipo de información sobre la seguridad con la que el modelo realiza esta asignación. Con predict(type="prob"), en lugar de una clasificación, se obtiene la probabilidad con la que el modelo considera que cada observación puede pertenecer a cada una de las clases.
+
+```{r}
+# Predicción de probabilidades
+# ==============================================================================
+predicciones <- modelo_final_fit %>%
+                predict(new_data = X2, type = "prob")
+head(predicciones, 4)
+```
+
+El resultado de predict(type="prob") es un dataframe con una fila por observación y tantas columnas como clases tenga la variable respuesta. El valor de la primera columna se corresponde con la probabilidad, acorde al modelo, de que la observación pertenezca a la clase No, y así sucesivamente. El valor de probabilidad mostrado para cada predicción se corresponde con la fracción de observaciones de cada clase en los nodos terminales a los que ha llegado la observación predicha en el conjunto de los árboles.
+
+Por defecto, predict() asigna cada nueva observación a la clase con mayor probabilidad (en caso de empate se asigna de forma aleatoria). Sin embargo, este no tiene por qué ser el comportamiento deseado en todos los casos.
+
+##Importancia de predictores
+
+Importancia por pureza de nodos
+
+En los modelos anteriores, el argumento importance se deja por defecto como "none". Esto desactiva el cálculo de importancia de predictores para reducir así el tiempo de entrenamiento. Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "impurity". Los modelos ranger calculan la impureza a partir del índice Gini en problemas de clasificación y con la varianza en regresión.
+
+```{r}
+# Entrenamiento modelo
+modelo <- rand_forest(
+             mode  = "classification"
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            importance = "impurity",
+            seed       = 123
+          )
+
+modelo <- modelo %>% finalize_model(mejores_hiperpar)
+modelo <- modelo %>% fit(pri_eval_num_ok ~., data = X2)
+
+# Importancia
+importancia_pred <- modelo$fit$variable.importance %>%
+                    enframe(name = "predictor", value = "importancia")
+
+# Gráfico
+ggplot(
+  data = importancia_pred,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "predictor", title = "Importancia predictores (pureza de nodos)") +
+geom_col() +
+scale_fill_viridis_c() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 5))
+```
+
+##Importancia por permutación
+Se entrena de nuevo el modelo, con los mejores hiperparámetros encontrados, pero esta vez indicando importance = "permutation".
+```{r}
+# Entrenamiento modelo
+modelo <- rand_forest(
+             mode  = "classification"
+          ) %>%
+          set_engine(
+            engine     = "ranger",
+            importance = "permutation",
+            seed       = 123
+          )
+
+modelo <- modelo %>% finalize_model(mejores_hiperpar)
+modelo <- modelo %>% fit(pri_eval_num_ok ~., data = X2)
+
+# Importancia
+importancia_pred <- modelo$fit$variable.importance %>%
+                    enframe(name = "predictor", value = "importancia")
+
+# Gráfico
+ggplot(
+  data = importancia_pred,
+  aes(x    = reorder(predictor, importancia),
+      y    = importancia,
+      fill = importancia)
+) +
+labs(x = "predictor", title = "Importancia predictores (permutación)") +
+geom_col() +
+scale_fill_viridis_c() +
+coord_flip() +
+theme_bw() +
+theme(legend.position = "none", axis.text = element_text(size = 5))
+```
+
+Ambas estrategias identifican SII_2C, PLR_1C, SII_1C, NLR_1C, PLR_pre, N_ciclos y Linf_tot,  como los predictores más influyentes, acorde a los datos de entrenamiento.
+
+
+
+
+
+
+
+
