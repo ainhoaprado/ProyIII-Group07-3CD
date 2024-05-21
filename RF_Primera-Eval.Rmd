@@ -6,11 +6,11 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
 ```{r}
-packages <- c('tidyverse', 'rpart', 'rpart.plot', 'gtools', 'Rmisc', 'scales', 'viridis', 'caret', 'AMR', 'randomForest', 'fastDummies', 'rattle', 'xgboost', 'ggpubr', 'reshape2', 'mlbench', 'readxl', 'ranger', 'tidymodels', 'parallel', 'doParallel', 'ggpubr')
+packages <- c('tidyverse', 'rpart', 'rpart.plot', 'gtools', 'Rmisc', 'scales', 'viridis', 'caret', 'AMR', 'randomForest', 'fastDummies', 'rattle', 'xgboost', 'ggpubr', 'reshape2', 'mlbench', 'readxl', 'ranger', 'tidymodels', 'parallel', 'doParallel', 'ggpubr', 'caret')
 
 suppressWarnings({
   if (sum(as.numeric(!packages %in% installed.packages())) != 0) {
@@ -48,8 +48,10 @@ df2 = select(df, -all_of(variables_inutiles))
 X1.1 = df2[,2:49]
 X1.2 = df2[,61:67]
 X = bind_cols(X1.1, X1.2)
-X$pri_eval_num_ok <- df2$pri_eval_num_ok
+X = data.frame(scale(X, center = TRUE, scale = TRUE))
+X$pri_eval_num_ok = df2$pri_eval_num_ok
 ```
+
 
 ## Modelo sin ajuste de parametros-FIRST EVALUATION-
 ```{r}
@@ -350,6 +352,7 @@ df2 = select(df, -all_of(variables_inutiles))
 X1.1 = df2[,2:49]
 X1.2 = df2[,61:67]
 X2 = bind_cols(X1.1, X1.2)
+X2 = data.frame(scale(X2, center = TRUE, scale = TRUE))
 X2$pri_eval_num_ok <- as.factor(df2$pri_eval_num_ok)
 ```
 
@@ -387,12 +390,11 @@ predicciones_ <- p_train$predictions
 ```
 
 ```{r}
-# Generar predicciones
-predicciones <- predict(modelo_sin_ajustar, data = X2)
+# Predicción usando el modelo
+predictions <- predict(modelo_sin_ajustar, X2, type = "response")
 
-# Asegúrate de que las predicciones están en el formato adecuado
-# Extrae las predicciones de clase si es un problema de clasificación
-predicciones_ <- predicciones$predictions
+# Convertir las predicciones y los valores reales en factores si aún no lo son
+predicciones_ <- predictions$predictions
 
 # Crear un marco de datos para evaluación que incluya observaciones y predicciones
 eval_train <- data.frame(
@@ -400,10 +402,9 @@ eval_train <- data.frame(
   pred = as.factor(predicciones_)  # asegúrate de convertir las predicciones a factor
 )
 
-# Matriz de confusión usando yardstick
-mat_confusion <- conf_mat(data = eval_train, truth = obs, estimate = pred)
-mat_confusion
-
+# Calcular la matriz de confusión
+conf_matrix <- confusionMatrix(eval_train$pred, eval_train$obs)
+print(conf_matrix)
 ```
 
 ## Mejora de los hiperparámetros
@@ -464,7 +465,7 @@ registerDoParallel(cl)
 grid_fit <- tune_grid(
               object    = workflow_modelado,
               resamples = cv_folds,
-              metrics   = metric_set(accuracy),
+              metrics   = metric_set(f_meas),
               grid      = hiperpar_grid
             )
 
@@ -474,13 +475,13 @@ stopCluster(cl)
 ```{r}
 # Mejores hiperparámetros por validación cruzada
 # ==============================================================================
-show_best(grid_fit, metric = "accuracy", n = 1)
+show_best(grid_fit, metric = "f_meas", n = 1)
 ```
 
 ```{r}
 # ENTRENAMIENTO FINAL
 # =============================================================================
-mejores_hiperpar <- select_best(grid_fit, metric = "accuracy")
+mejores_hiperpar <- select_best(grid_fit, metric = "f_meas")
 
 modelo_final_fit <- finalize_workflow(
                         x = workflow_modelado,
