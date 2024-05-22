@@ -1,26 +1,23 @@
 # ProyIII-Group07-3CD-Análisis de la Respuesta al Tratamiento con Pembrolizumab en Pacientes con Cáncer de Pulmón NSCLC-
-
 This repository contains all the data and scripts needed to perform the analysis described. Explore and use these resources to delve deeper into our findings and methodologies.
 
 Este proyecto se centra en el análisis avanzado de datos de pacientes con cáncer de pulmón de células no pequeñas (NSCLC) tratados con Pembrolizumab en etapas avanzadas. Utilizando diversas técnicas estadísticas y de aprendizaje automático, el objetivo es predecir las variables más influyentes en la evaluación inicial de la enfermedad y la respuesta al tratamiento, así como realizar un análisis de supervivencia. Este estudio no solo busca mejorar la personalización y efectividad de los tratamientos para el cáncer de pulmón, sino también contribuir a los Objetivos de Desarrollo Sostenible relacionados con la salud y bienestar, la innovación médica y las asociaciones para alcanzar las metas.
 
-## Estructura del Repositorio
-
-- `diagrama_gantt.xlsx`: Diagrama de Gantt del proyecto.
-- `Base_Pembro_1L_febrero_24__v2.xlsx`: Conjuntos de datos utilizados en para el tramiento primero de datos realizado en `Treatment.Rmd`.
-- `df_supervivencia.csv`: conjunto de datos utilizado para hacer el análisis de supervivencia, `survival_model.Rmd`. 
-- `df_definitivo.xlsx`: conjunto de datos para realizar `PCA.Rmd` y `Linear Regression Model using PCA.Rmd`. 
-- `df_definitivo-2.xlsx`: conjunto de datos utilizado para realizar `RF_Primera-Eval.Rmd` y `RF_mejor_respuesta.Rmd`. 
-- `Linear Regression Model using PCA.Rmd`: Script para análisis de regresión lineal.
-- `ODS.pptx`: Presentación de PowerPoint con los ODS que sostiene el proyecto.
-- `PCA.Rmd`: Análisis de Componentes Principales.
-- `PLS_M2_FINAL.Rmd`: Modelo de Mínimos Cuadrados Parciales.
-- `RF_Primera-Eval.Rmd`: Modelo de Random Forest para la predicción de la primera evaluacion.
-- `RF_mejor_respuesta.Rmd`: Modelo de Random Forest para la predicción de la mejor respuesta.
-- `Treatment.Rmd`: Script de R para el tratamiento inicial de los datos.
-- `XGBoost.Rmd`: Implementación del modelo XGBoost.
-- `survival_model.Rmd`: Análisis de supervivencia de los pacientes.
-- `PROYIII-GROUP07.pdf`: Documento con la memoria completa del proyecto.
+## Repository Structure
+- `Gantt_diagram.xlsx`: Gantt chart of the project.
+- `Base_Pembro_1L_february_24__v2.xlsx`: Datasets used in the first data processing performed in `Treatment.Rmd`.
+- `df_survival.csv`: dataset used to do the survival analysis, `survival_model.Rmd`. 
+- `df_definitive.xlsx`: dataset to perform `PCA.Rmd` and `Linear Regression Model using PCA.Rmd`. 
+- `df_definitive-2.xlsx`: dataset used to perform `RF_First-Eval.Rmd` and `RF_best_response.Rmd`. 
+- `Linear Regression Model using PCA.Rmd`: Script for linear regression analysis.
+- `ODS.pptx`: PowerPoint presentation with the ODS supported by the project.
+- `PLS_M2_FINAL.Rmd`: Partial Least Squares Model.
+- `RF_First-Eval.Rmd`: Random Forest model for the prediction of the first evaluation.
+- `RF_best_response.Rmd`: Random Forest model for the prediction of the best response.
+- `Treatment.Rmd`: R script for the initial treatment of the data.
+- `XGBoost.Rmd`: XGBoost model implementation.
+- `survival_model.Rmd`: Patient survival analysis.
+- `PROYIII-GROUP07.pdf`: Document with the complete project report.
 
 ## Documentation
  [1] S. v. Buuren and K. Groothuis-Oudshoorn. “mice: Multivariate Imputation by Chained
