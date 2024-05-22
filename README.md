@@ -1,6 +1,7 @@
 # ProyIII-Group07-3CD-Analysis of the Response to Pembrolizumab Treatment in Patients with NSCLC- Lung Cancer.
 This repository contains all the data and scripts needed to perform the analysis described. Explore and use these resources to delve deeper into our findings and methodologies.
-Este proyecto se centra en el análisis avanzado de datos de pacientes con cáncer de pulmón de células no pequeñas (NSCLC) tratados con Pembrolizumab en etapas avanzadas. Utilizando diversas técnicas estadísticas y de aprendizaje automático, el objetivo es predecir las variables más influyentes en la evaluación inicial de la enfermedad y la respuesta al tratamiento, así como realizar un análisis de supervivencia. Este estudio no solo busca mejorar la personalización y efectividad de los tratamientos para el cáncer de pulmón, sino también contribuir a los Objetivos de Desarrollo Sostenible relacionados con la salud y bienestar, la innovación médica y las asociaciones para alcanzar las metas.
+
+This project focuses on advanced data analysis of patients with non-small cell lung cancer (NSCLC) treated with Pembrolizumab in advanced stages. Using various statistical and machine learning techniques, the objective is to predict the most influential variables in the initial evaluation of the disease and the response to treatment, as well as to perform a survival analysis. This study not only seeks to improve the personalization and effectiveness of lung cancer treatments, but also to contribute to the Sustainable Development Goals related to health and well-being, medical innovation and partnerships to achieve the goals.
 
 ## Repository Structure
 - `Gantt_diagram.xlsx`: Gantt chart of the project.
