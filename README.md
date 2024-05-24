@@ -7,7 +7,8 @@ This project focuses on advanced data analysis of patients with non-small cell l
 - `Gantt_diagram.xlsx`: Gantt chart of the project.
 - `Base_Pembro_1L_february_24__v2.xlsx`: Datasets used in the first data processing performed in `Treatment.Rmd`.
 - `df_survival.csv`: dataset used to do the survival analysis, `survival_model.Rmd`. 
-- `df_definitive.xlsx`: dataset to perform `PCA.Rmd` and `Linear Regression Model using PCA.Rmd`. 
+- `df_definitive.xlsx`: dataset to perform `PCA.Rmd` and `Linear Regression Model using PCA.Rmd`.
+- `PCA.Rmd`:an initial exploratory analysis using PCA.
 - `df_definitive-2.xlsx`: dataset used to perform `RF_First-Eval.Rmd` and `RF_best_response.Rmd`. 
 - `Linear Regression Model using PCA.Rmd`: Script for linear regression analysis.
 - `ODS.pptx`: PowerPoint presentation with the ODS supported by the project.
@@ -18,6 +19,14 @@ This project focuses on advanced data analysis of patients with non-small cell l
 - `XGBoost.Rmd`: XGBoost model implementation.
 - `survival_model.Rmd`: Patient survival analysis.
 - `PROYIII-GROUP07.pdf`: Document with the complete project report.
+  
+## Installation
+To run the scripts and analyses included in this repository, you need to set up a suitable R environment. Make sure you have R and RStudio installed. Steps for setting up the environment and the necessary dependencies are provided here:
+
+```bash
+# Install the necessary R packages
+install.packages(c("ggplot2", "dplyr", "randomForest", "xgboost", "caret", "mice", "knitr", "readxl", "FactoMineR", "factoextra", "ropls", "tidyr", "pls","tibble", "ranger","survival", "KMsurv","survMisc","survminer","openxlsx","purrr",))
+````
 
 ## Documentation
  [1] S. v. Buuren and K. Groothuis-Oudshoorn. “mice: Multivariate Imputation by Chained
